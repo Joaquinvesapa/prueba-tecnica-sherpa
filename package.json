@@ -1,0 +1,15 @@
+{
+  "name": "pdf-to-text",
+  "version": "1.0.0",
+  "description": "A simple Node.js application to convert PDF files to text using Playwright.",
+  "main": "index.ts",
+  "scripts": {
+    "start": "node --env-file=.env index.ts"
+  },
+  "dependencies": {
+    "@types/node": "^24.0.13",
+    "axios": "^1.10.0",
+    "pdf-parse": "^1.1.1",
+    "playwright": "^1.54.1"
+  }
+}
