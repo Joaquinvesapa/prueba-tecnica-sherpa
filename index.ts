@@ -1,3 +1,5 @@
+import { UrlResponse } from "./types/interfaces";
+
 // Invocación del portal
 const { chromium } = require("playwright");
 const fs = require("fs");
@@ -106,22 +108,20 @@ async function iniciarAventura() {
             " ",
             "%20"
           )}&unlockCode=${codigo}`;
-          console.log("URL completa:", urlCompleta);
-          passWord = await axios
+
+          let data = await axios
             .get(urlCompleta)
             .then((response) => response.data)
-            .then((data) => {
-              let characters = data.challenge.targets.map((index) =>
-                binarySearchIndex(data.challenge.vault, index)
-              );
-              codigo = characters.join("");
-              console.log("CODIGO DESENCRIPTADO:", codigo);
-              return codigo;
-            })
+            .then((data: UrlResponse) => data)
             .catch(function (error) {
-              // manejar error
               console.log(error);
             });
+
+          let characters = data.challenge.targets.map((index) =>
+            binarySearchIndex(data.challenge.vault, index)
+          );
+          codigo = characters.join("");
+          console.log("CODIGO DESENCRIPTADO:", codigo);
         }
       }
 
