@@ -1,7 +1,7 @@
 export interface UrlResponse {
   success: boolean;
   error: string | undefined;
-  challenge: Challenge;
+  challenge: Challenge | undefined;
 }
 
 export interface Challenge {

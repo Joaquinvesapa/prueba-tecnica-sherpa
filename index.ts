@@ -3,7 +3,6 @@ import { UrlResponse } from "./types/interfaces";
 // Invocación del portal
 const { chromium } = require("playwright");
 const fs = require("fs");
-const pdfParse = require("pdf-parse");
 const axios = require("axios");
 
 const siglosPDF = ["XIV", "XV", "XVI"];
@@ -19,33 +18,44 @@ const closePopUp = async (page) => {
 };
 
 async function iniciarAventura() {
-  try {
-    const browser = await chromium.launch({ headless: false });
-    const page = await browser.newPage();
-    console.log(process.env.SHERPA_USER);
-    // Navegar a la cripta
-    await page.goto("https://pruebatecnica-sherpa-production.up.railway.app");
+  //Iniciar navegador en background
+  /*const browser = await chromium.launch();*/
 
-    // Esperar a que cargue algún elemento específico
+  //Iniciar portal (navegador)
+  const browser = await chromium.launch({ headless: false });
+
+  const page = await browser.newPage();
+
+  // Navegar a la cripta (URL de la página de inicio de sesión)
+  await page.goto("https://pruebatecnica-sherpa-production.up.railway.app");
+
+  try {
+    //Ingreso de claves secretas para la cripta (inicio de sesion)
     const emailInput = await page.waitForSelector('input[id="email"]');
     const passInput = await page.waitForSelector('input[id="password"]');
     await emailInput.fill(process.env.SHERPA_USER);
     await passInput.fill(process.env.SHERPA_PASSWORD);
 
-    // await page.waitForNavigation(5000);
-    await page.click('button.sherpa-button[type="submit"]');
+    //Iniciar sesion
+    await Promise.all([
+      page.waitForNavigation(),
+      page.click('button.sherpa-button[type="submit"]'),
+    ]);
 
-    // console.log(await options[1].textContent()); //XIV
-    // console.log(await options[2].textContent()); //XV
-    // console.log(await options[3].textContent()); //XVI
-    // console.log(await options[4].textContent()); //XVII
-    // console.log(await options[5].textContent()); //XVIII
+    let codigo: string | undefined = "";
 
-    let codigo = "";
-
+    //Buscar siglos sin desafio
     for (let siglo of siglosPDF) {
+      //Filtrar siglo por siglo
       await page.selectOption("select", siglo);
 
+      let bookTitleElement = await page.waitForSelector("h3.text-lg");
+      let bookTitle = "";
+      if (bookTitleElement !== null) {
+        bookTitle = await bookTitleElement.textContent();
+        console.log("Título del libro:", bookTitle);
+      }
+      //Desbloquear siguiente manuscrito si es necesario
       if (codigo !== "") {
         let codeInput = await page.waitForSelector(
           'input[placeholder="Ingresá el código"]'
@@ -61,6 +71,8 @@ async function iniciarAventura() {
 
       let button = await page.waitForSelector("button:not([disabled])");
 
+      //Obteniendo manuscrito
+      console.log(`Obteniendo manuscrito del siglo: ${siglo}`);
       const [download] = await Promise.all([
         page.waitForEvent("download"),
         button.click(),
@@ -68,23 +80,20 @@ async function iniciarAventura() {
 
       let path = await download.path();
       let buffer = await fs.readFileSync(path);
+      //Extrayendo el contenido del PDF
       const contenido = buffer.toString("utf8");
 
       // Extraer código usando regex
       let match = contenido.match(/acceso:\s*([A-Z0-9]+)/i);
       if (match) {
         codigo = match[1];
-        console.log("Código extraído:", codigo);
+        console.log(`Código extraído: ${codigo} \n\n`);
       } else {
-        console.error("No se encontró el código en el PDF");
+        throw new Error("No se encontró el código en el PDF \n\n");
       }
-      console.log(
-        `Siglo ${siglo} - Siguiente Acceso: ${
-          match ? match[1] : "No encontrado"
-        }`
-      );
     }
 
+    // Buscar siglos con desafío
     for (let siglo of siglosDesafio) {
       await page.selectOption("select", siglo);
 
@@ -97,38 +106,51 @@ async function iniciarAventura() {
       let buttonDoc = await page.waitForSelector(
         "button:has-text('Ver documentación')"
       );
-      let passWord;
+
       if (buttonDoc !== null) {
         await buttonDoc.click();
 
         let preURL = await page.waitForSelector("pre.text-green-400");
-        let url = await preURL.textContent();
+        let url: string = await preURL.textContent();
+
         if (url !== "") {
           let urlCompleta = `${url}?bookTitle=${bookTitle.replace(
             " ",
             "%20"
           )}&unlockCode=${codigo}`;
 
-          let data = await axios
+          //Buscar información en la API
+          console.log("Buscando información en las criptas de Sherpa...🔍");
+          let data: UrlResponse = await axios
             .get(urlCompleta)
             .then((response) => response.data)
             .then((data: UrlResponse) => data)
             .catch(function (error) {
-              console.log(error);
+              throw new Error(error);
             });
 
-          let characters = data.challenge.targets.map((index) =>
-            binarySearchIndex(data.challenge.vault, index)
-          );
-          codigo = characters.join("");
-          console.log("CODIGO DESENCRIPTADO:", codigo);
+          //Si se encontro una respuesta de la API intentar desencriptar el código
+          if (data.success === false) {
+            throw new Error(data.error);
+          } else {
+            if (data.challenge !== undefined) {
+              let targets: number[] = data.challenge.targets;
+              let vault: string[] = data.challenge.vault;
+
+              console.log("Desencriptando el código...🔐");
+              let characters: string[] = targets.map((index) =>
+                binarySearchIndex(vault, index)
+              );
+              codigo = characters.join("");
+            }
+          }
+          console.log(`Contraseña desencriptada: ${codigo}`);
         }
       }
 
       await closePopUp(page);
-
+      //Desbloquear siguiente manuscrito si es necesario
       if (codigo !== "") {
-        console.log("Código para desbloquear:", passWord);
         let codeInput = await page.waitForSelector(
           'input[placeholder="Ingresá el código"]'
         );
@@ -140,46 +162,48 @@ async function iniciarAventura() {
           await buttonUnlock.click();
         }
       }
+
       await closePopUp(page);
 
       let button = await page.waitForSelector("button:not([disabled])");
 
+      console.log(`Obteniendo manuscrito del siglo: ${siglo}`);
       const [download] = await Promise.all([
         page.waitForEvent("download"),
         button.click(),
       ]);
 
+      //Extraer contenido del PDF
       let path = await download.path();
       let buffer = fs.readFileSync(path);
-      console.log(buffer);
-      // const contenido = buffer.toString("utf8");
-      let contenido = await pdfParse(buffer)
-        .then((data) => {
-          data.text;
-        })
-        .catch((error) => {
-          console.error("Error al procesar el PDF:", error);
-        });
+      const contenido = buffer.toString("utf8");
 
-      console.log(`Siglo ${siglo} \n`, `${contenido} \n`);
       // Extraer código usando regex
       if (contenido !== "") {
-        let match = contenido.match(/acceso:\s*([A-Z0-9]+)/i);
-        if (match) {
-          codigo = match[1];
-          console.log("Código extraído:", codigo);
+        codigo = extractCode(contenido);
+        if (codigo !== undefined) {
+          //Mostrar codigo si se encontro
+          console.log(`Código extraído: ${codigo} \n\n`);
+        } else if (contenido !== null) {
+          //Mostrar contenido si no se encontro el codigo
+          const matches = [...contenido.matchAll(/\(([^)]*)\)/g)]
+            .map((m) => m[1].trim())
+            .filter((linea) => linea !== "");
+
+          const mensajeCompleto = matches.join("\n");
+
+          console.log(`\n\n${mensajeCompleto}`);
         } else {
-          console.error("No se encontró el código en el PDF");
+          //Error
+          console.error("No se encontró el código en el PDF \n\n");
         }
-        console.log(
-          `Siglo ${siglo} - Siguiente Acceso: ${
-            match ? match[1] : "No encontrado"
-          }`
-        );
       }
     }
   } catch (error) {
     console.error("Error al iniciar la aventura:", error.message);
+  } finally {
+    // Cerrar el navegador
+    await page.close();
   }
 }
 
@@ -200,6 +224,13 @@ function binarySearchIndex(arr, targetIndex) {
   }
 
   return null; // si el índice es inválido
+}
+
+function extractCode(contenido: string) {
+  let result = contenido.match(/acceso:\s*([A-Z0-9]+)/i);
+  if (result) {
+    return result[1];
+  }
 }
 
 iniciarAventura();
